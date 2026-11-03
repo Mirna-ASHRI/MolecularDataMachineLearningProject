@@ -80,6 +80,11 @@ Requirements: Python 3, numpy, pandas, matplotlib, scikit-learn, rdkit, gplearn.
 - The best brute-force subset (MSLE 0.603: `TDOS4.0`, `NumHeteroatoms`, `TDOS3.2`) was selected from about 575 candidates on the same data and was **not** adopted.
 - Results show associations, not chemical mechanisms. Correlated features (TDOS bins, Mass/heteroatoms) make single-feature importances unstable.
 - No leaderboard score is recorded here.
+
+## AI-assistance disclosure
+ 
+Claude (Anthropic) was used as an AI coding assistant during the development of this project.
+
 ## Ideas for next steps
  
 Nested cross-validation for any feature search; a proper hold-out test of the brute-force subsets; chemistry-aware features (functional-group counts, alkyl chain length, fingerprints) via RDKit; prediction intervals.
