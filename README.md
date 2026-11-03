@@ -1,129 +1,85 @@
-# Predicting Molecular Photostability from Small Data
-
-Solution notebook for the Kaggle competition **Molecular Data Machine Learning**
-(NSF Molecule Maker Lab Institute). The task is to predict the photostability (T80)
-of thiophene-based oligomers from a very small dataset, and to identify which
-molecular features explain it.
-
-T80 is the time for a material's performance to fall to 80% of its initial value
-under light exposure. A larger T80 means better photostability.
-
-## The problem
-
-- 42 labeled molecules, 143 usable computed features each (mass, heteroatom
-  count, electronic density-of-states values such as TDOS4.0, ...), plus SMILES
-- 9 test molecules with hidden T80
-- Metric: mean squared logarithmic error (MSLE)
-- Core difficulty: more features than molecules, so models can memorize noise and
-  some features correlate with T80 purely by chance
-
-## Approach
-
-1. **Log target.** Train on `log1p(T80)` so ordinary squared error equals MSLE.
-   T80 is strongly right-skewed (median 10.5, mean 22.7, max 103.9). Predictions
-   are converted back with `expm1` and clipped at 0.
-2. **Honest validation.** Repeated 5-fold CV (3 repeats) and leave-one-out (LOO),
-   always compared with a "predict the mean" baseline. Imputation and scaling are
-   inside scikit-learn pipelines, so nothing leaks from held-out molecules.
-3. **Models.** Ridge at several penalty strengths, Random Forest, Lasso, and
-   symbolic regression (gplearn).
-4. **Feature importance, three ways.** Random Forest importance, permutation
-   importance on held-out folds, and Lasso selection frequency over 100 bootstrap
-   resamples, combined by average rank.
-5. **Small-subset tests.** All subsets of the three key features (`TDOS4.0`,
-   `NumHeteroatoms`, `Mass`), plus `SelectKBest` run inside CV as a fair test of
-   automatic feature selection.
-6. **Final model.** 70/30 blend of Ridge and a shallow Random Forest on the three
-   key features, trained on all 42 molecules.
-
-## Results
-
-Cross-validated MSLE (lower is better):
-
-| Model | Features | 5-fold x3 | Leave-one-out |
+# Predicting Molecular Photostability (T80)
+ 
+Machine-learning pipeline for the Kaggle **molecular-machine-learning** competition: predict **T80**, a photostability measure (higher = more stable), for thiophene-based molecules from computed molecular descriptors. The metric is **MSLE** (mean squared logarithmic error, lower is better).
+ 
+The data are tiny (**42 labelled molecules, 9 test molecules, 143 numeric features**), so the project is mostly about honest validation and avoiding overfitting.
+ 
+## Headline results
+ 
+| Model (repeated 5-fold CV, 15 scores) | MSLE | RMSLE | vs. mean baseline |
 |---|---|---|---|
-| Mean baseline | none | 1.133 | 1.125 |
-| Ridge a=1 | all 143 | 3.578 | |
-| Ridge a=10 | all 143 | 1.767 | |
-| Ridge a=100 | all 143 | 0.863 | |
-| Random Forest | all 143 | 0.828 | |
-| Random Forest (depth 4) | 3 key features | 0.746 | 0.828 |
-| **Ridge a=1** | **TDOS4.0 + NumHeteroatoms + Mass** | **0.647** | **0.685** |
-| Ridge a=1 | TDOS4.0 + NumHeteroatoms | 0.655 | |
-| Blend 70% Ridge + 30% RF | 3 key features | | 0.680 |
-| Ridge + SelectKBest inside CV | auto-selected, k=10 | 0.929 | |
-| Symbolic regression | 3 key features | 1.252 | |
-
-The all-feature models reached a training error of only 0.34 RMSLE but a
-cross-validated error near 0.9, which is clear memorization.
-
-### Feature importance
-
-| Feature | RF rank | Permutation rank | Lasso freq. rank | Average |
-|---|---|---|---|---|
-| TDOS4.0 | 4 | 1 | 4 | 3.0 |
-| NumHeteroatoms | 6 | 5 | 1 | 4.0 |
-| Mass | 3 | 3 | 29 | 11.7 |
-
-Ridge on subsets of the key features: `TDOS4.0 + NumHeteroatoms` (0.655) is almost
-as good as all three (0.647) and clearly better than any single feature (0.76 to
-0.85), so two features carry nearly all of the signal. Standardized Ridge
-coefficients were -0.57 (TDOS4.0), -0.57 (NumHeteroatoms) and +0.28 (Mass).
-
-## Findings
-
-- Strongly regularized models on a few features beat models on all 143 features,
-  which barely beat the baseline or were worse than it.
-- `TDOS4.0` and `NumHeteroatoms` were the most consistently selected features
-  across the three methods. `TDOS3.9` ranks right behind TDOS4.0 because the two
-  are neighboring, highly correlated bins.
-- In this dataset, higher TDOS4.0 and more heteroatoms go with shorter T80.
-  A possible explanation (a hypothesis, not a conclusion) is that heteroatoms add
-  reactive sites for photodegradation.
-- Symbolic regression found a formula that reduced to roughly
-  `log T80 ~ 2.65 - standardized NumHeteroatoms`, but it generalized worse than
-  the baseline. A plain linear model is about as good as this data allows.
-- The final blend (LOO 0.680) and plain Ridge (LOO 0.685) are a statistical tie.
-
-## Limitations
-
-- Only 42 training and 9 test molecules: CV estimates are noisy, 5-fold folds hold
-  about 8 molecules, and any leaderboard score on 9 molecules is mostly luck.
-- The three key features were identified by the competition organizers using the
-  full dataset, so scores using them are optimistic. When features were selected
-  automatically inside CV, MSLE was about 0.93, much closer to the baseline.
-  A realistic expectation for finding features from scratch is nearer 0.9 than 0.65.
-- The brute-force subset search (Section 6F) tested hundreds of combinations using
-  rankings computed on all data. Its best result (0.603) is exploratory and
-  affected by the winner's curse.
-- Correlated features (for example TDOS3.9 and TDOS4.0) split importance, so a low
-  rank does not prove a feature is unimportant.
-- Importance shows association with T80, not proven causation.
-- The Ridge alpha was chosen on the same CV used to report scores, which is
-  slightly optimistic.
-
-## Not pre-trained
-
-No pre-trained molecular models were used, so this entry belongs to the
-non-pre-trained category.
-
+| **Ridge (alpha=1), 3 features** | **0.647** | 0.804 | **+42.9%** |
+| Random forest (depth 4), 3 features | 0.746 | 0.864 | +34.2% |
+| Random forest, all 143 features | 0.821 | 0.906 | +27.5% |
+| Ridge (alpha=100), all features | 0.863 | 0.929 | +23.8% |
+| Mean baseline | 1.133 | 1.064 | 0% |
+| Ridge (alpha=1), all features | 3.578 | 1.892 | -215.9% |
+ 
+- **Submitted model:** 70% Ridge + 30% random forest (depth 4) on `TDOS4.0`, `NumHeteroatoms`, `Mass`. Leave-one-out MSLE 0.680 (Ridge alone 0.685, so the blend gain is marginal).
+- **Key features:** `TDOS4.0` and `NumHeteroatoms` carry most of the signal (both negatively related to T80). Together they score 0.655; adding `Mass` improves it by only 0.008.
+- **Expected error:** roughly a factor of 2 in T80 (RMSLE about 0.8). With 42 training and 9 test molecules, the leaderboard score will be noisy.
+- Full numbers, graphs and interpretation: **`results_report.pdf`**. Short version: **`one_pager.pdf`**.
 ## Repository contents
-
-- `moleculardatamachinelearningproject.ipynb`: full analysis with outputs
-- `submission.csv`: predictions for the 9 test molecules
-- `README.md`: this file
-
-The competition data (`train.csv`, `test.csv`) is not included. Download it from the
-[competition page](https://www.kaggle.com/competitions/molecular-machine-learning)
-and place it where the notebook can find it.
-
+ 
+| File | Description |
+|---|---|
+| `molecular_ml_t80_clean.ipynb` | The full notebook (Sections 1-8), consistent constants and helper functions |
+| `results_report.pdf` | Results interpretation report with graphs and numerical and qualitative findings |
+| `one_pager.pdf` | One-page summary |
+| `README.md` | This file |
+| `submission.csv` | Generated by the notebook (columns `Batch_ID`, `T80`) |
+ 
+## Data
+ 
+Expected under `/kaggle/input/.../molecular-machine-learning/`:
+ 
+- `train.csv` - 42 rows, 146 columns (includes `T80`)
+- `test.csv` - 9 rows, same columns (the `T80` column is not used)
+- `sample_submission.csv` - defines the required ID order and format
+Feature groups: molecular descriptors (`Mass`, `LogP`, `TPSA`, `NumHeteroatoms`, ...), electronic properties (HOMO/LUMO, excitation, dipole), spectra-like columns (`T1-T20`, `S1-S20`, `O1-O20`) and density-of-states curves (`TDOS1.5-4.7`, `SDOS2.5-5.4`). `Smiles` is used for visualisation and sanity checks only; it is not a model input.
+ 
 ## How to run
-
-1. Open the notebook on Kaggle with the competition data attached, or locally with
-   the CSV files and an updated path.
-2. Install dependencies: `pip install numpy pandas matplotlib scikit-learn rdkit gplearn`
-3. Run all cells top to bottom.
-
-## Tools
-
-Python, pandas, NumPy, scikit-learn, RDKit, matplotlib, gplearn
+ 
+1. Open the notebook in Kaggle with the competition data attached (or place the three CSV files under a matching `/kaggle/input/` path).
+2. Run the first cell (`!pip install -q rdkit gplearn`). This upgrades scikit-learn, so **restart the kernel and Run All** to keep one library version throughout.
+3. Run all cells. Section 8 (symbolic regression) takes a few minutes.
+4. The notebook writes `submission.csv` in Section 7E.
+Requirements: Python 3, numpy, pandas, matplotlib, scikit-learn, rdkit, gplearn.
+ 
+## Pipeline
+ 
+| Section | What it does |
+|---|---|
+| Setup | Imports, `SEED = 0`, `KNOWN3`, CV scheme, model factories (`make_ridge`, `make_rf`, `make_baseline`) and metric helpers |
+| 1 | Load data; shapes, columns, missing values, T80 distribution |
+| 2 | RDKit: parse SMILES, draw molecules, check `Mass` and `NumHeteroatoms` against RDKit |
+| 3 | T80 vs. key features; correlation screen |
+| 4 | Ridge and random forest baselines (training error as a sanity check only) |
+| 5 | Repeated 5-fold CV comparison of all models vs. a mean baseline |
+| 6 | Feature importance: RF, permutation, Lasso with bootstrap stability, combined rank; small-subset tests; brute-force search (flagged as optimistic) |
+| 7 | Range check, leave-one-out blend validation, final fit, predictions, `submission.csv` |
+| 8 | Symbolic regression (exploratory, not used) |
+ 
+## Method notes
+ 
+- **Target:** the models are trained on `log(1 + T80)`, so plain mean squared error equals MSLE. Predictions are converted back with `expm1` and clipped at 0.
+- **Validation:** `RepeatedKFold(5, 3, random_state=0)` for every model-selection decision; leave-one-out only to validate the blend.
+- **Preprocessing:** median imputation and standardisation inside every pipeline, so nothing leaks across folds.
+- **Reproducibility:** one `SEED = 0` for all random components.
+## Main findings
+ 
+1. Heavily regularised or low-dimensional models win; unregularised ridge on all 143 features is worse than guessing the mean.
+2. TDOS4.0 (and neighbouring TDOS3.8-3.9 bins) and heteroatom count are the most consistent predictors across three importance methods.
+3. `Mass` is negatively correlated with T80 on its own but gets a positive coefficient in the model because it correlates with heteroatom count. It should not be read as "heavier is more stable".
+4. Symbolic regression (CV MSLE 1.252) and automatic feature selection inside CV (0.93-1.09) did not beat the three known features.
+5. The most stable training molecules are alkylated thiophenes with only two heteroatoms (T80 around 101-104).
+## Limitations
+ 
+- Very small sample; CV standard deviations (0.22-0.31) are as large as the gaps between the top models.
+- Alpha, the blend weight and the feature choice were tuned or confirmed on the same 42 molecules, so reported CV is mildly optimistic.
+- The best brute-force subset (MSLE 0.603: `TDOS4.0`, `NumHeteroatoms`, `TDOS3.2`) was selected from about 575 candidates on the same data and was **not** adopted.
+- Results show associations, not chemical mechanisms. Correlated features (TDOS bins, Mass/heteroatoms) make single-feature importances unstable.
+- No leaderboard score is recorded here.
+## Ideas for next steps
+ 
+Nested cross-validation for any feature search; a proper hold-out test of the brute-force subsets; chemistry-aware features (functional-group counts, alkyl chain length, fingerprints) via RDKit; prediction intervals.
